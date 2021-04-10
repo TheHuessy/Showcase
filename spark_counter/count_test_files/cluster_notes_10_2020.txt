@@ -1,0 +1,673 @@
+https://dev.to/awwsmm/building-a-raspberry-pi-hadoop-spark-cluster-8b2
+
+YARN RESOURCE: https://www.linode.com/docs/databases/hadoop/install-configure-run-spark-on-top-of-hadoop-yarn-cluster/
+
+SPARK SUBMIT RESOURCE: https://spark.apache.org/docs/latest/submitting-applications.html
+
+11/02/2020
+	-Need to reinitialize the namenode
+		Working last time and updating linux caused the sd card to become corrupt
+	-Swapped out card and tried to get as much config stuff off the old one
+	-Need to write up all steps to recover namenode and datanodes
+	-
+
+10/09/2020
+	What to do when turning on the cluster
+	Need to still set up the datanode as a spark datanode
+		Master will start with start-master.sh in /opt/spark/sbin but it has no nodes assigned to it
+		Setting up worker node 
+		https://www.tutorialkart.com/apache-spark/how-to-setup-an-apache-spark-cluster/
+			--Check java versions
+				>> 11
+			--download versions as needed (might have to dig a little bit)
+			--Make sure all JAVA_HOME vars are set to 11
+				-bashrc
+				-hadoop-env.sh
+				-[later] spark-env
+					Maybe even pull in the master node one before adding master node ip
+			--Copy spark tarball from nn to dn01
+			--Unzip to /opt/
+			--Create symlink between the output and /opt/spark
+			--test spark shell
+		Appears that I already set up the worker to be a worker...
+			Why isn't spark master assigning it as a worker?
+			From tutorial
+				SPARK_MASTER is set in conf/spark-env as 192.168.0.150
+				From datanode in sbin/, ran: sudo ./start-slave.sh spark://192.168.0.150:7077
+					Needs sudo access to start it
+					Said it's started it
+					Checked the master web ui and THEY (both nodes) are listed as workers
+						Yes! I think having the namenode as a worker is a good thing [?]
+		Will need a concrete list of things that need to be done on cluster boot to get back in this state
+			Single aliased command send from namenode that does:
+				--Start Yarn (if that isn't already starting on startup)
+					>> It's doing it at startup by using cron to run the start-hdfs.sh file you made
+						Not the best idea I'm lead to believe and it would be smarter to just use the 'startup' alias you have in place which also starts up the spark history server
+				--Start spark-master on namenode
+
+				--Send command to workers to start spark-slaves
+					created alias/bash function 'nodecmd' which sends commands to just the datanodes
+						'clcmd' sends commands to datanodes, but then executes the command on the namenode
+					'nodecmd sudo sh $SPARK_HOME/sbin/start-slave.sh'
+					>> DON'T HAVE TO SEND A COMMAND TO THE NODE
+						Make sure that the node(s) are in the slaves file in conf and then run start-slaves.sh
+							salves plural runs the start-slave command via spark on all designated slave nodes
+							slave singlular starts the salve on the machine that kicks off the script
+
+
+07/16/2020
+	Starting up again
+	Still getting the hanging problem with spark
+		Changed the ram allocation settings to be 512 across the board with 4 cores
+			Still hanging
+	Going to add a debug line to log4.properties file in /opt/spark/conf
+		`log4j.logger.org.apache.hadoop.util.NativeCodeLoader=DEBUG`
+	It might be the hadoop error
+		Looked like it was just a warning, but maybe I need to point it to my hadoop version/it isn't pointin to the right one
+			How do we set that?
+				Check those hadoop warnings and try to do what they ask and see where that gets you
+		>> Added this to spark-env.sh
+			`export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$HADOOP_HOME/lib/native`
+				I added a version of this to bashrc, but maybe it needs to be in both places...
+					>>No dice
+		Things the warnings are saying
+			- WARN SparkConf: The configuration key 'spark.yarn.executor.memoryOverhead' has been deprecated as of Spark 2.3 and may be removed in the future. Please use the new key 'spark.executor.memoryOverhead' instead.
+			
+			-OpenJDK Client VM warning: You have loaded library /opt/hadoop/lib/native/libhadoop.so.1.0.0 which might have disabled stack guard. The VM will try to fix the stack guard now.
+			It's highly recommended that you fix the library with 'execstack -c <libfile>', or link it with '-z noexecstack'.
+
+			- DEBUG NativeCodeLoader: Failed to load native-hadoop with error: java.lang.UnsatisfiedLinkError: /opt/hadoop/lib/native/libhadoop.so.1.0.0: /opt/hadoop/lib/native/libhadoop.so.1.0.0: wrong ELF class: ELFCLASS64 (Possible cause: architecture word width mismatch)
+				>>This seems to be the biggest issue
+					Internet suggests that there is a mismatch between 32 and 64 bit. They may not be matching, and that might be why
+						Am I on 64 bit saprk?
+						Am I on 64 bit hadoop?
+						Am I on 64 bit Java?
+							> YES
+								opened jshell and used: 
+									`System.getProperty("sun.arch.data.model")`
+						Is my os 32 bit?
+							I think it is
+				IDEA:
+					There is a chance that spark is pointing to the wrong java version (?)
+						I have java 11 and java 8 installed
+							Hadoop is pointing to java 11, which is also JAVA_HOME in bashrc and hadoop-env
+					JAVA_HOME in spark-env.sh is java 8!
+						According to comments, this was set intentionally...
+							Is it wise to change the other settings to java 8?
+								export JAVA_HOME="/usr/lib/jvm/java-8-openjdk-armhf"
+					Changed the following:
+						bashrc JAVA_HOME to point to java 8
+						hadoop-env.sh HAVA_HOME to point to java 8
+						>>> No dice, might be because the default java is still 11
+							Could it be that I put 64bit hadoop on here?
+						in bashrc, changed $LD_LIBRARY_PATH to stop ending in a colon and pointing to itself
+							Might work, maybe not. Should yeild different java.library.path or whatever was in that error
+							>>> No dice!
+					For funsies, just going to change the spark conf and all others to point to java 11
+						This will probs make things fail again at a hadoop level
+							That's fine
+					>>> No dice on any of these things
+				I WAS ABLE TO GET SPARK MASTER UP
+					This didn't solve the spark-shell problem, BUT it did show me that the only node with spark assigned to it is nn00
+						We need to configure the spark master/worker files, I think!
+							SPARK ISN'T INSTALLED ON dn01!
+								So this might be part of the problem...
+						GOING TO HAVE TO COME BACK TO THIS ONCE SPARK IS UP ON THE NAMENODE
+				New Idea:
+					There is a chance that my version of spark is not meant for this release of hadoop
+						The one I downloaded and installed was meant for hadoop 2.7, I have 3.2 installed
+							There is a spark version 3 that apparently is meant for hadoop 3
+								mirrors are listed here
+									https://www.apache.org/dyn/closer.lua/spark/spark-3.0.0/spark-3.0.0-bin-hadoop3.2.tgz
+					-Downloaded newer version of spark on namenode
+						`wget https://us.mirrors.quenda.co/apache/spark/spark-3.0.0/spark-3.0.0-bin-hadoop3.2.tgz`
+					-Unzip tar to appropriate folder
+						#From dir with tar in it
+						sudo tar -xvf spark-3.0.0-bin-hadoop3.2.tgz -C /opt/
+						>> Unzipped it into opt/spark-3.0.0-bin-hadoop3.2
+					-Move old "spark" directory to "spark_old"
+						#have to sudo su in order to move this folder
+						#from /opt
+						sudo su
+						mv spark spark_old
+					-Move new "spark-3.0.0-bin-hadoop3.2" directory to "spark"
+						#while still sudo su'd
+						mv spark-3.0.0-bin-hadoop3.2 spark
+						exit #kills out of su
+					√-Copy old spark-env.sh from "spark_old/conf/" to new "spark/conf/."
+					X-Change SPARK_HOME to point to that spark
+						Don't need to do this because we've just swapped out the contents of spark
+					√-Test with `spark-shell --version`
+						Shows that we're on spark 3.0.0
+					[May have to add the start-master script from spark to the startup alias]
+					-Restart
+					-Test again
+						Something new!
+							It actually spat out a java runtime error
+								SIGSEGV (0xb) at pc=0xb32d9350, pid=4052, tid=0xb5159460
+								>>Nothing useful on the internet
+						Switched java to 11
+							IT WORKED!
+								IT TAKES A MINUTE TO LOAD BUT IT FUCKING WORKED!
+						>> New version of Spark that works with Hadoop AND a newer version of java!
+							YAYAYAYAYAYAY
+								Back to that test job
+									FYI, Spark-shell exits via `:q` like vim
+										Fucking nerds
+				Counting Alice in Wonderland
+					Copied over the previous log4j.properties file from spark_old
+						spark-shell --master yarn --deploy-mode client --files /opt/spark/conf/log4j.properties --conf "spark.executor.extraJavaOptions='-Dlog4j.configuration=log4j.properties'" --driver-java-options "-Dlog4j.configuration=file:/opt/spark/conf/log4j.properties"
+							Didn't run...
+				New issue...
+					I can start up the shell, but if I exit, it looks like it shuts spark down
+						The shell acts as its own job/instance of spark
+							Weird thing is that after I quit, the history server dies
+								The master is still up tho...
+					Was able to resurrect it by running $SPARK_HOME/sbin/stop-all.sh and $SPARK_HOME/sbin/start-all.sh
+						I don't have to do that EVERY time do I?
+					>> It actually doesn't seem to be killing things
+						I think the history server might just be down because
+							I can reopen spark-submit after closing it
+					It could be that the spark job itself is just going to take a while to load because it has to do a bunch of stuff/execute things
+			Was sending the wrong spark job anyway
+				ORIGINAL I was supposed to run:
+					spark-submit --deploy-mode client --class org.apache.spark.examples.SparkPi $SPARK_HOME/examples/jars/spark-examples_2.11-2.4.3.jar 7
+				FIXED to match my version
+					spark-submit --deploy-mode client --class org.apache.spark.examples.SparkPi $SPARK_HOME/examples/jars/spark-examples_2.12-3.0.0.jar 2
+						holy shit it worked!
+							SparkPi java class refers to the mathmatical constant Pi, not the raspberry pis
+								I think the numbers 7 and 2 in those commands are number of threads to utilize
+				THIS SHIT WORKS!!!!
+					One thing is that there isn't all that much output
+						It just spat out the warnings and then the answer
+							Maybe there's a setting to make it output the INFO stuff
+								It could also be that this newer version of spark just doesn't output it automatically
+	<<<<<<< START HERE >>>>>>>>>>>>
+	Setting up worker node 
+		https://www.tutorialkart.com/apache-spark/how-to-setup-an-apache-spark-cluster/
+			-Check java versions
+				>> 11
+			-download versions as needed (might have to dig a little bit)
+			-Make sure all JAVA_HOME vars are set to 11
+				-bashrc
+				-hadoop-env.sh
+				-[later] spark-env
+					Maybe even pull in the master node one before adding master node ip
+			-Copy spark tarball from nn to dn01
+			-Unzip to /opt/
+			-Create symlink between the output and /opt/spark
+			-test spark shell
+
+		After/Before
+			-Hunt down all cluster related ENV VARS
+			-Collect them into a section of .bashrc
+			-Try to see if you can run everything after sourcing that instead of having all the vars scattered across the file system
+				Will make editing/tweaking things a lot easier
+
+			-Write out all the possible start shell scripts that you would want to run to start spark
+			-Do the same for stop scripts
+			-Create aliases in .bashrc to start and stop spark
+			-Add to the clreboot/shutdown and startup aliases
+
+			-Create backups of cluster node specific config/env files
+			-Put them on SQLPi
+
+
+
+
+
+
+
+
+
+
+
+
+06/06/2020
+	Going to try to actually test spark
+		Booted up cluster
+			Aliased `startup` to turn on hdfs and yarn
+				Might add it to the crontab later on, we'll see
+					It's nice to be able to decide when to turn it on vs it always turning on
+			Ran `startup`
+				Everything worked fine
+					UI starts up and shows the data and name node to be active
+		Tried picking up where I left off at passing a spark command to the cluster from the namenode:
+			`spark-submit --deploy-mode client --class org.apache.spark.examples.SparkPi $SPARK_HOME/examples/jars/spark-examples_2.11-2.4.3.jar 7`
+
+			bash tells me it has no idea what `spark-submit` is!
+				FUUUUUUUCK
+					Spark hasn't been correctly initialized I think
+						Checked .bashrc to make sure it has SPARK_HOME
+							It does, but it looks like I've commented out the part that attaches it to the path
+								Good chance that's what's stoping me rn
+									I think I should add :$SPARK_HOME/something to the `export PATH=` line
+										Need to check if there is a bin folder within /opt/spark
+											There is a bin and an sbin folder that might both need to be added to path
+												(and there are R and python and yarn folders so we can see it comes built int for those languages/hooks)
+										The line I commented out jsut has /bin, so I'll skip sbin for now
+				Added line, spark starts, but fails:
+					`OpenJDK Client VM warning: You have loaded library /opt/hadoop/lib/native/libhadoop.so.1.0.0 which might have disabled stack guard. The VM will try to fix the stack guard now.
+					
+					It's highly recommended that you fix the library with 'execstack -c <libfile>', or link it with '-z noexecstack'.
+					
+					20/06/06 13:30:03 WARN NativeCodeLoader: Unable to load native-hadoop library for your platform... using builtin-java classes where applicable`
+
+					FUUUUUCK
+						It might be that the file I'm pointing to is wrong in the spark-submit command
+							Unlikely since it looks like it's not even getting that far, but worth a shot just to double check
+								It was the wrong file, so maybe that's it
+									The example called for spark-examples_2.11-2.4.3.jar
+									I have spark-examples_2.11-2.4.5.jar
+						Looks like the warning that I got was independent of the spark job
+							That seems to just be a few VM/spark/hadoop settings that need to be updated/fixed
+						Spat warnings but didn't die
+							Is hanging/thinking
+								I assumed that the last integer after the jar location was the number of cores, I ran it at 2 instead of the 7 provided
+								Hanging an awful long time... (13:41)
+									Maybe I need to compile java first?
+										Probs not because that should happen at start up and I'll only need to recompile if I make changes to files so that probs isn't it...
+							>>Killed it
+								Can't seem to find logs to look at
+									Also looks like the /opt/spark/conf/spark-defaults.conf file doesn't have logs explicitly set
+										-SETTING UP THE SPARK LOG UI-
+										[Going off of the 'monitor your spark applications' section of the SPARK RESOURCE file up top on linode]
+										-Added the following:
+											spark.eventLog.enabled  true
+											spark.eventLog.dir hdfs://nn00:9000/spark-logs
+										-Made a spark-logs folder on hdfs
+											`hdfs dfs -mkdir /spark-logs`
+										-Configured history server related properties in the defaults.conf file
+											spark.history.provider            org.apache.spark.deploy.history.FsHistoryProvider
+											spark.history.fs.logDirectory     hdfs://nn00:9000/spark-logs
+											spark.history.fs.update.interval  10s
+											spark.history.ui.port             18080
+												^^This will be the port that the UI is put on
+										-Started the history server
+											$SPARK_HOME/sbin/start-history-server.sh
+								Going to try to re-run it to see what, if any, logs it generates
+									spark-submit --deploy-mode client --class org.apache.spark.examples.SparkPi $SPARK_HOME/examples/jars/spark-examples_2.11-2.4.5.jar 2
+										^^ Again, the 2 at the end is a guess, I may have to dig to find out what that integer refers to
+								>>> Looks like it's not starting up the spark job at all, or at least not to the point where there are logs
+						Going to try to set up some other spark things and build a query from scratch to test in the shell
+							-Set up monitor to watch live applications, not just the logs
+								Looks like the history server is it
+									Will check on Monday at work to see if our spark monitor is infact that or if there is a hidden spark thing I need to turn on in addition to the history server
+							-Test spark in spark-shell
+								Where the hell is my hdfs mount actually located?
+									Need to download a file to it and I can't seem to find where it points to as it's home directory
+								>> OK
+									The hdfs mount path is
+										hdfs://nn00:9000/
+									If you run `hdfs dfs -ls hdfs://nn00:9000/` it will show the root dir for hdfs and has the spark-logs folder in it
+									-Adding that path to .bashrc as $HDFS_PATH
+										Works!
+								Downloading Alice in wonderland
+									hdfs dfs -mkdir $HDFS_PATH/alice
+									wget -O alice.txt https://www.gutenberg.org/files/11/11-0.txt
+										And there's a certificate issue with gutenberg.org...
+											Looks like a wget issue
+												ran `sudo apt-get install ca-certificates` 
+													No dice because ca-certificates is up to date
+											Needed to add a flag to make it not look for certificates
+												` wget -O alice.txt --no-check-certificate https://www.gutenberg.org/files/11/11-0.txt`
+									hdfs dfs -put alice.txt $HDFS_PATH/alice
+								Opening spark-shell and running line counts
+									spark-shell
+										It is hanging when I try to run this
+											This is probably what's keeping the original job from running/hanging
+									var input = spark.read.textFile("$HDFS_PATH/alice/alice.txt")
+									input.filter(line => line.length()>0).count()
+								>Tried setting max yarn memory to the total container memory of 2048 (was 1900)
+									Also changed the minimum to 256 just for funsies (was 64)
+								>>That didn't help, going to set all the memory values to the example on linode
+							Changing things in $SPARK_HOME/conf/spark-defaults.conf:
+								Saw that the spark.yarn.executor.memoryOverhead was set to 348
+									According to the linode site, its min is 384
+										It means I entered it wrong and it could be leading to this issue
+											Restored everything else to original values and changed spark.yarn.executor.memoryOverhead to 384
+												Might go as high as 400 or 512 depending on the math
+										>>>NO Dice!
+							spark-shell --master yarn --deploy-mode client --files /opt/spark/conf/log4j.properties --conf "spark.executor.extraJavaOptions='-Dlog4j.configuration=log4j.properties'" --driver-java-options "-Dlog4j.configuration=file:/opt/spark/conf/log4j.properties"
+						>> I think I need to go through an ensure the memory allocation is right
+							I feel that's the problem, that or not specifying driver cores, etc.
+							
+
+
+
+
+
+
+
+05/14/2020
+	--Configuring spark on the datanode(s)
+		Directions are to add new env vars in .bashrc
+			Not sure if my shortening of the env vars previously will cause these new ones to not work/appear in the main path
+				There's a chance that since it's a specified var that it is called explicitly so we might be good
+			`export HADOOP_CONF_DIR=$HADOOP_HOME/etc/hadoop
+			export LD_LIBRARY_PATH=$HADOOP_HOME/lib/native:$LD_LIBRARY_PATH`
+		This place is a really great resource for hadoop configuration
+			https://www.linode.com/docs/databases/hadoop/install-configure-run-spark-on-top-of-hadoop-yarn-cluster/
+		Created the "spark-defaults.conf" file in `$SPARK_HOME/conf` on nn00
+				`nano $SPARK_HOME/conf/spark-defaults.conf`
+			Didn't yet make edits
+				Want to make sure I'm setting it up for my setup (my RAM limits vs the directions)
+					Need to do some super easy math before plowing ahead
+						Thank god for that magic linode page
+						>> HOW MEMORY ALLOCATION WORKS (Top Down):
+							yarn.nodemanager.resource.memory-mb
+								This dedicates how much memory is allocated to the whole magilla
+									It only competes with what the OS needs
+								--2048 mb should be fine
+							yarn.scheduler.maximum-allocation-mb
+								The max ram allowed for AppMaster type jobs
+									I think this only matters for the namenode
+										I don't think that the AppMaster runs on the datanodes so you could set this a little higher/not worry about it hitting up against mapreduce's rducing tasks too much
+											Just the reducing, not the mapping, it looks like
+							yarn.scheduler.minimum-allocation-mb
+								The smallest amount of ram dedicated to a given yarn task
+							yarn.app.mapreduce.am.resource.mb
+							mapreduce.map.memory.mb
+
+						My specs (that I'm pretty sure about)
+							Total RAM (mb)									3810
+							Idle RAM usage (mb)				 	 			120
+							Total Possible Allocated RAM (mb) 				3690
+								Total Yarn allocated RAM (mb)				2048
+									Total Yarn Mapeduce "App" RAM (mb)		1024
+										Total Mapreduce mapping RAM (mb)	512
+										Total Mapreduce reducing RAM (mb)	512
+									Total [ideal] Spark RAM (mb)			1024  
+								Remaining OS RAM (mb)						1642
+
+						spark.master            yarn
+						spark.driver.memory     512m
+							^^ This apparently is the lowest value this can be for spark to run
+						spark.yarn.am.memory    1024m
+						spark.executor.memory   512m
+							^^ This apparently is the lowest value this can be for spark to run
+						spark.yarn.executor.memoryOverhead 348m
+						spark.executor.cores    4
+
+						** I Think this makes sense. The overhead is their minium, for me it's more ~250mb, but their min is 348. I may be wrong on this, but I think that the executor and driver memory are seperate and add up to the max container size, which we set at 1G. The yarn.am.memory is a share of the 2G yarn app master ram (whatever it's called). This should be 1G becuase the other 1G is dedicated to mapreduce. This might be wrong. I may need to decrease the spark.yarn.am.memory to 512. Not too sure, hopefully any resulting errors or failures won't be catestrophic
+						Executor and Overhead combine, so make sure that's below the max spark ram (1G)
+
+						https://www.linode.com/docs/databases/hadoop/install-configure-run-spark-on-top-of-hadoop-yarn-cluster/
+
+			*Currently at the point where one would reboot the cluster, send stop commands for hdfs and then start commands and test spark
+
+
+05/11/2020
+	--Starting back up
+		State of things:
+			-I was following the instructions on https://dev.to/awwsmm/building-a-raspberry-pi-hadoop-spark-cluster-8b2
+			-Running into problems when trying to start up hdfs
+				-Some sort of ssh/connecting to itself problem that we will hit soon, I imagine
+			-Continuing on the instructions, just adding everything to the namenode first and then adding required things (like spark) to the data node(s)
+		--Change cluster commands to output the name of the node with the message
+			Makes it easier to know which node can or can't complete something/has or doesn't have a secific file or program
+	--Continuing..
+		-Starting by editing /opt/hadoop/etc/hadoop/hadoop-env.sh to add the JAVA_HOME var
+			As with the .bashrc file, I'm going rogue from the directions because they don't work and am changing the entry from the exprected:
+				"export JAVA_HOME=$(readlink –f /usr/bin/java | sed "s:bin/java::")"
+			to:
+				"export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-armhf"
+			We then get the expected result when executing:
+				`hadoop version | grep hadoop`
+			of:
+				Hadoop 3.2.1
+		-Skipping the Spark setup instructions because they seem to have been done and I can get the spark version with `spark-shell --version`
+			Tried doing the cluster command for that as `clcmd spark-shell --version` and I realized from the output that spark is not on dn01, which it shouldn't be
+		-Editing the Hadoop config files in /opt/hadoop/etc/hadoop
+			All seemed to be the way the directions want them to be
+				Seems like general yarn/mapreduce stuff, nothing node/pi specific
+		-Reformatted the namenode
+			`hdfs namenode -format -force`
+			>> Looks like it ran happily, took almost no time probably because of the small size of the sd card and the fact that there's like nothing on it
+		-Moment of truth!
+			`start-dfs.sh`
+			Same, if not similar error:
+				```
+				start-dfs.sh
+				Starting namenodes on [nn00]
+				nn00: ssh: connect to host nn00 port 22: Connection timed out
+				Starting datanodes
+				localhost: pi@localhost: Permission denied (publickey,password).
+				Starting secondary namenodes [nn00]
+				nn00: ssh: connect to host nn00 port 22: Connection timed out
+				OpenJDK Server VM warning: You have loaded library /opt/hadoop/lib/native/libhadoop.so.1.0.0 which might hav                                       e disabled stack guard. The VM will try to fix the stack guard now.
+				It's highly recommended that you fix the library with 'execstack -c <libfile>', or link it with '-z noexecstack'.
+				2020-05-11 16:00:31,424 WARN util.NativeCodeLoader: Unable to load native-hadoop library for your platform..                                       . using builtin-java classes where applicable
+
+				```
+			>> Guess 1:
+				I didn't configure the security section of this because I was lazy and figured it wasn't needed. This could explain the fact that it can't just ssh into itself
+					If I've learned anything about 127.0.0.1 and/or localhosts this week (remeber the great jupyter crash of 2020), it's that I have no idea what I'm doing when it comes to localhost hosted things like this
+				Going to follow the instructions which have me editing `/etc/ssh/sshd_config`
+					The file is unedited and that right there might be part of it
+				ALL EDITS MADE HERE NEED TO BE COPIED TO THE OTHER PI(s)
+					Made edits, going to copy over to other pi
+						Hope I didn't fuck it up or we'll need to get in via hdmi
+						>>Nothing really happened, but that hopefully means it worked
+				Installing fail2ban on both nodes just to be safe
+					`clcmd sudo apt install fail2ban –y`
+						This didn't work, ended up just using the open ssh sessions and installing manually with
+							sudo apt-get install fail2ban
+				Created, edited, and copied the jail.lcal files					
+				Going to reboot the pis and see if we can't run hadoop
+					Yup, ssh is fucked somehow, probably because I've been using a password for putty and not a key
+						Going to have to get into them and change that/get putty to just let me ssh in without a password
+							Got into it, changed the config back to password authentication
+								What kind of keys did I generate?
+					>> Got it all squared away, the pis can talk to each other as well as to and from C3PX
+						Had a bad pub key for nn00 on dn01, which caused a lot of problems trying to connect
+							Gave it the new one and ran `sudo service ssh restart`
+						There was also a bad key on nn00 for nn00, which may explain the whole problem with ssh-ing into oneself
+				>> STILL NO DICE!
+					This time it's saying that connection is timed out, not that it's refused
+						That's something, I guess
+					At least I've mastered ssh-ing and keys/got a good refresher
+						Maybe it's a config thing for hdfs
+							Something about starting the service from the namenode is odd
+								Why would it need to ssh into itself to get started?
+					>>> THE IPS IN THE HOSTS FILE (/etc/hosts) WERE 192.168.9.150, NOT .0~!!!
+						That was it, that what probably really the only thing, but at least you got the ssh thing ironed out too
+		-Getting a warning about bad libraries while running hadoop commands
+			Not terrible, shit still works, but annoying
+				https://community.pivotal.io/s/article/How-to-eliminate-error-message-WARN-util-NativeCodeLoader--Unable-to-load-native-hadoop-library-for-your-platform----with-gphdfs?language=en_US
+					^An attempt, but it didn't really help
+						There's a java answer to this, might have to ask Eric...
+			>> It's covered a few steps down, added the following lines to the hadoop-env.sh file to get rid of the stack error:
+				export HADOOP_OPTS="-XX:-PrintWarnings -Djava.library.path=$HADOOP_PREFIX/lib"
+				export HADOOP_COMMON_LIB_NATIVE_DIR=${HADOOP_PREFIX}/lib/native
+
+			AND these lines to .bashrc:
+				export HADOOP_HOME_WARN_SUPPRESS=1
+				export HADOOP_ROOT_LOGGER="WARN,DRFA"
+			>> Can run hadoop without any errors!
+				Still need to start it automatically on boot
+		-Kept going and am getting a spark error when I try to add text to a file
+			Internet suggests that I need to have Java 8 installed (as well as the v11 I'm using for hadoop)
+				https://stackoverflow.com/questions/53583199/pyspark-error-unsupported-class-file-major-version-55
+			-I've had java8 on the pi(s?) all along
+				I need to point spark to it without disrupting hadoop's actions
+					That link suggests that there is a spark-env.sh file somewhere
+						Can't seem to find it, I can find a template, but not it itself
+							It might be generated as needed, or it's hiding elsewhere
+								Looks like it needs to be established
+									Made it by cp-ing the template and dropping the .template
+								proof:
+									https://spark.apache.org/docs/0.9.0/configuration.html
+			-spark-env.sh
+				What should I change in order to force it to see the "right" java dir?
+					The right java dir:
+						/usr/lib/jvm/java-8-openjdk-armhf
+					export JAVA_HOME="/usr/lib/jvm/java-8-openjdk-armhf"
+						Added that ^
+				Booted up spark-shell and it claims to be running Java 1.8.0_212
+					I think this is what we want
+						There were some java warnings about natrive hadoop library when the shell spun up
+							Might want to make the same OPTS entries in spark-env.sh as I did for hadoop to quiet those
+								That might work?
+									Going to try it
+										Didn't work because that usually goes into .bashrc, not the env files
+											Is there a sparkrc?
+												No, but there is a logging conf file
+													Same idea as env.sh, copy via template
+														Followed these answers:
+															https://stackoverflow.com/questions/58451752/remove-startup-message-to-change-spark-log-level
+
+															Updated values:
+																log4j.rootCategory=INFO, console --> log4j.rootCategory=WARN, console
+																log4j.logger.org.apache.spark.repl.Main=WARN --> log4j.logger.org.apache.spark.repl.Main=ERROR
+			-IT WORKED! Spark is (sorta) configured correctly!
+		-[Actual] Cluster setup
+			Had some trobles with `rsync –avxP $HADOOP_HOME $pi:/opt` loop
+				It was an encoding problem between me copying and pasting from chrome to the pi via putty
+					It was misreading the "-" character as something else
+						In the future, I might have to type everything out manually in putty just to be sure
+			Setup didn't work because Java is not on dn01
+				Because I didn't setup with NOOBS, I need to install (both) Javas myself
+					`-jdk11
+						https://linuxize.com/post/install-java-on-raspberry-pi/
+					`-jdk8
+			Still not Working when executing `clcmd hadoop version | grep Hadoop`
+				It looks like there isn't hadoop running on dn01
+					There is, I've ssh-ed into it and tested, it's there
+						something odd about multi-line commands?
+						something odd about my dns names vs my aliases to ssh into them?
+							Tried changing the command definintion in .bashrc
+								No dice
+								One word commands like "hostname" still work, so it's probs not that
+						There could be some sort of permissions error?
+				Try it the other way around?
+					From dn01 and see if it works in reverse
+						Same behavior meaning that it's something to do with the ssh command transfer
+							Maybe it's a security thing that can be disabled
+								Let those ssh-ing in execute commands
+									Maybe just chmod the hadoop folder?
+				>>>> As with several of your problems, someone else had them and solved them in the comments
+					Had to add all the PATH exporting parts of bashrc to the top
+						Above the section that dicates what happens when commands are not interactive
+							Basically establishes the PATH right when you make the SSH connection so that hadoop is mapped
+					Added the same PATH block from .bashrc to /etc/profile at the top
+						Did it on both machines
+							Works!!!!
+			Configured the yarn and mapreduce configs on nn00
+				Tried firing it up like the instructions said
+					It worked, but listed no nodes
+						Need to scp all the config files over to the other node(s)
+							from namenode
+							--clscp /opt/hadoop/etc/hadoop/core-site.xml
+							--clscp /opt/hadoop/etc/hadoop/mapred-site.xml
+							--clscp /opt/hadoop/etc/hadoop/hdfs-site.xml
+							--clscp /opt/hadoop/etc/hadoop/workers
+							--clscp /opt/hadoop/etc/hadoop/master
+						Pulled that info from the author's inspiration for hadoop setup tasks here:
+							https://www.linode.com/docs/databases/hadoop/how-to-install-and-set-up-hadoop-cluster/
+								Explains more of what one is editing and what it means
+									Instructions are for a 2gb rig
+						This didn't quite do it...
+				>>> It looks like instead of nn00:9000 in core-site.xml, you want [IP]:9000
+					According to one person in the comments who had the same problem I did
+					STILL NO DICE!!!!!!
+				--Trying changing hdfs-site.xml to match the directions
+					I had commented out lines from the previous version because I thought something was off
+						Maybe having a comment in the middle of an XML doc is bad?
+							I was using the java style comment chars: <!-- [balh] -->
+								Restarted	
+									`clreboot`
+								Reformatted namenode
+									`hadoop namenode -format -force`
+								Started it up
+									`start-all.sh`
+										This throws a warning about how it's not good for production
+											I can't seem to find out why exactly
+												Maybe because it could be destructive if one didn't mean to start EVERYTHING
+					WORKED!!!!
+						In that when I run `clcmd jsp` it shows datanode active on the datanode
+						THe UI shows that I have just under 30gb of space capacity!
+							This is good because the 2 factor replication would take the two 32gb cards and half them
+								Or there's something wrong and you just don't understand it yet
+		Still need to get spark going on the datanode
+
+		Rebooting thoughts
+			Create shell scripts that can be run via clcmd that run:
+				-stop-dfs.sh && stop-yarn.sh
+				-start-dfs.sh && start-yarn.sh
+
+
+
+
+
+
+
+
+
+
+
+
+
+Cluster notes
+
+Step 1:
+	Get the pis up and running with the POE hats
+
+Step 2:
+	Get them configured on the network with static IPs
+
+Step 3:
+	follow the instructions on creating a cluster from here:
+		https://magpi.raspberrypi.org/articles/build-a-raspberry-pi-cluster-computer
+			-Installed mypi
+			-Allegedly to bind the nodes together:
+				From namenode
+					mpiexec -n 2 --hosts 192.168.0.150,192.168.0.151 hostname
+						This all was nonesence^^ ignore
+		OR
+		https://dev.to/awwsmm/building-a-raspberry-pi-hadoop-spark-cluster-8b2
+
+
+The ultimate goal is to be able to run mapreduce by yourself on this cluster
+	Spark is preferred, but you might have to start with hadoop
+
+04/09/2020
+	-Working from this hadoop turotial. Starting at the single node setup
+		https://dev.to/awwsmm/building-a-raspberry-pi-hadoop-spark-cluster-8b2#conclusion
+	-Was able to fix the nginx issue on the pi-hole pi from this tutorial
+		https://docs.pi-hole.net/guides/nginx-configuration/
+		We'll see if that fixes the nginx vs other web platform nonsence stemming from the pihole
+			Pihole appears to be running still
+	-Added a bunch of "cluster" and general commands into the name node's .bashrc file
+		You can pass commands to the other node via clcmd
+		There are other functions, all available in the .bashrc file
+			they start with 'cl' as a shortened version of 'cluster'
+				Clever, I know
+		"update" will update and upgrade the pis
+	-Updated all 4 of the pis to the most recent version of raspian
+	-Added public keys to the two pis on the cluster
+		They can ssh into each other without passwords because of rsa keys
+	**-Need to still put Hadoop on the two
+		Going to have to only use the sd cards, which are somewhat small
+			Might be a good idea to backup the images of the 32gb cards and put them on larger cards if/when they go on sale
+				Not an immediate need, however. You probably won't need to process more than 64gb of data
+		Might want to consider adding the SQLpi to this cluster
+			Could use the SSD as part of HDFS storage space potentionall
+		--Installed hadoop and java
+		-Had to configure JAVA_HOME to /usr/lib/jvm/java-11-openjdk-armhf/
+			The instructions said otherwise, but I followed the advice here, changed it in .bashrc
+				https://askubuntu.com/questions/510179/java-home-problem-i-cant-find-javas-path
+	--Intalling spark
+		ran this to finally get a version I can install
+			`wget https://us.mirrors.quenda.co/apache/spark/spark-2.4.5/spark-2.4.5-bin-hadoop2.7.tgz`
+	--Starting HDFS
+		--trying to run start-dfs.sh and it keeps dying because it's looking to ssh into itself to start the namenode
+			should I be itializing it from a different computer?
+				That can't be right
+					It's got to be something in the configs...
+		Just some other resources that may be useful (may...)
+			https://medium.com/@oliver_hu/build-a-hadoop-3-cluster-with-raspberry-pi-3-f451b7f93254
+			https://stackoverflow.com/questions/15211848/hadoop-start-dfs-sh-permission-denied
+			https://intellipaat.com/community/34737/hadoop-namenode-is-not-starting-up
+			https://stackoverflow.com/questions/56720317/start-dfs-sh-throws-port-22-connection-timeout-error
+			https://spark.apache.org/docs/latest/spark-standalone.html

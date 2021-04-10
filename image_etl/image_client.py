@@ -1,13 +1,7 @@
-#from thread import ThreadPool
 import concurrent.futures as cf
 from imgurpython import ImgurClient
 import os
 import yaml
-
-## Have it initialize, grab images via tag
-  ## return links?
-  ## Have save method which saves to local dir
-    ## In this case the samba share
 
 class ImPI:
 
@@ -37,6 +31,7 @@ class ImPI:
         return(outs)
 
     def fetch_images_by_tag(self, tag, destination_path, threads=4):
+        file_destinations = []
         images_to_download = self.get_some_links_by_tag(tag)
         with cf.ThreadPoolExecutor(max_workers=threads) as executor:
             for image_link in images_to_download:
@@ -44,16 +39,5 @@ class ImPI:
         print("{} images have been downloaded to {}".format(len(images_to_download), destination_path))
 
 
-
-
-
 ## TO DOWNLOAD NEW IMAGES:
-ImPI().fetch_images_by_tag("cats", "/home/pi/c_drive/test_dl")
-
-
-        ##Threading to download!
-
-
-
-
-
+#ImPI().fetch_images_by_tag("cats", "/home/pi/c_drive/test_dl")

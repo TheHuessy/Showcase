@@ -13,8 +13,6 @@ for link in images:
     image_out_data = image_out_data.append(image_data, ignore_index=True)
     print("Finished processing {}".format(images[link]))
 
-
-
 ## Write data out to SQL
 SQLUtils("novartis_dummy_db").write_dataframe_safe(image_out_data, "pulled_images")
 

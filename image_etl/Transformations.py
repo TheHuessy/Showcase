@@ -87,7 +87,7 @@ def make_raw(image_path, image_link):
     new_path = append_file_name(image_path, "raw")
     raw_image = Image.open(image_path)
     ensure_path(os.path.dirname(new_path))
-    raw_image.save(new_path)
+    raw_image.save(fp=new_path, format="JPEG")
     return(pd.DataFrame({
         "image_id": [os.path.basename(image_path).split(".")[0]],
         "file_name": [os.path.basename(new_path)],
@@ -147,7 +147,7 @@ def make_thumb(image_path, image_link):
     new_path = append_file_name(image_path, "thumbnail")
     raw_image = Image.open(image_path)
     new_dims = calc_thumb_resize(raw_image.size)
-    raw_image.resize(new_dims).save(new_path)
+    raw_image.resize(new_dims).save(fp=new_path, format="JPEG")
 
     return(pd.DataFrame({
         "image_id": [os.path.basename(image_path).split(".")[0]],

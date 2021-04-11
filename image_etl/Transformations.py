@@ -4,7 +4,7 @@ Transformation methods for the hypothetical image ETL
 """
 
 from PIL import Image
-from SQLUtils import SQLUtils
+from SQLEngine import SQLEngine
 from datetime import datetime
 import os
 import pandas as pd
@@ -30,11 +30,22 @@ def append_file_name(image_path,append):
     new_raw_name = "{}_{}.{}".format(base_name,append,image_ext)
     return(os.path.join(target_dir,base_name,new_raw_name))
 
-def make_raw(image_path):
+def make_raw(image_path, image_link):
     new_path = append_file_name(image_path, "raw")
+    raw_image = Image.open(image_path)
     ensure_path(os.dirname(new_path))
-    os.rename(image_path,new_path)
-    return(new_path)
+    raw_image.save(new_path)
+    return(pd.DataFrame({
+        "image_id": [os.path.filename(image_path).split(".")[0]],
+        "file_name": [os.path.filename(new_path)],
+        "file_path" : [new_path],
+        "image_width_px": [raw_image.size[0]],
+        "image_height_px": [raw_image.size[1]],
+        "image_size_byte": [os.path.getsize(new_path)],
+        "origin_link": [image_link],
+        "date_saved": [datetime.now().strftime("%Y-%m-%d")]
+        })
+        )
 
 def calc_thumb_resize((raw_width, raw_height)):
     ## target_height/raw_height = conv_factor to multiply raw by to get desired thumb size
@@ -76,15 +87,36 @@ def make_thumb(image_path, image_link):
                     ##Don't have to worry about returning and merging dataframe rows
                     ##Have another task, get_image_data that parses a single row output from make_thumb and then adds the new line with raw swapped in and return the two row df that way
 
+def write_data_to_pg(dataframe,dest_table):
+    try:
+        with SQLEngine('novartis_dummy_db') as engine:
+            dataframe.to_sql(
+                    name=dest_table,
+                    con = engine,
+                    if_exists='append',
+                    index=False
+                    )
+    except Exception as err:
+        print("Could not write data out to postgres!\n{}".format(err))
+
+def remove_original(image_path):
+    os.remove(image_path)
 
 
-def expand_dir_and_transform(image_path, image_link):
+def expand_dir_and_transform(image_path, image_link, dest_table):
 #    base_name,image_ext = os.path.basename(image_path).split(".")
 #    target_dir = os.path.dirname(image_path)
     ## Call specific functions for each file type
         ## Rename the file that's already downloaded to raw, no real transformation other than to be renamed
-        raw = make_raw(image_path)
-        thumb = make_thumb(image_path, image_link)
+        try:
+            raw = make_raw(image_path)
+            thumb = make_thumb(image_path, image_link)
+            write_data_to_pg(raw.append(thumb, ignore_index=True), dest_table)
+        except Exception as err:
+            print("Was not able to transform {}!\nERROR: {}".format(image_path, err))
+        else:
+            remove_original(image_path)
+
 
 
 ### START HERE!! vvvvvv ###

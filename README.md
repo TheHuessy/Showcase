@@ -74,4 +74,4 @@ Though the downloading task is multi-threaded, the rest of the ETL, namely the t
 
 Ideally I'd like to convert this using spark at least for the transformations. An obstacle with that appraoch could be that there aren't any spark libraries that handle processing images the way `PIL` does. One could be able to distribute a lot of the file handling, but the ETL would be bottle necked at the transformation steps, rendering spark's advantages relatively useless.
 
-This leaves the multi-processing approach as the probable next best solution, but would have to be executed in an environment with more resources than my Raspberry Pi 4 (ARM CPU and 4 GB RAM totl).
+This leaves the multi-processing approach as the probable next best solution, but would have to be executed in an environment with more resources than my Raspberry Pi 4 (ARM CPU and 4 GB RAM total).

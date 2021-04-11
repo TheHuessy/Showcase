@@ -78,5 +78,15 @@ class SQLUtils:
 
         return(result)
 
-
+    def write_dataframe_safe(self,dataframe,dest_table):
+        try:
+            with SQLEngine(self.db) as engine:
+                dataframe.to_sql(
+                        name=dest_table,
+                        con = engine,
+                        if_exists='append',
+                        index=False
+                        )
+        except Exception as err:
+            print("Could not write data out to postgres!\n{}".format(err))
 

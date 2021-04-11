@@ -89,4 +89,6 @@ class SQLUtils:
                         )
         except Exception as err:
             print("Could not write data out to postgres!\n{}".format(err))
+        else:
+            print("Dataframe written to {}".format(dest_table))
 

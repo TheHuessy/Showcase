@@ -33,11 +33,11 @@ def append_file_name(image_path,append):
 def make_raw(image_path, image_link):
     new_path = append_file_name(image_path, "raw")
     raw_image = Image.open(image_path)
-    ensure_path(os.dirname(new_path))
+    ensure_path(os.path.dirname(new_path))
     raw_image.save(new_path)
     return(pd.DataFrame({
-        "image_id": [os.path.filename(image_path).split(".")[0]],
-        "file_name": [os.path.filename(new_path)],
+        "image_id": [os.path.basename(image_path).split(".")[0]],
+        "file_name": [os.path.basename(new_path)],
         "file_path" : [new_path],
         "image_width_px": [raw_image.size[0]],
         "image_height_px": [raw_image.size[1]],
@@ -47,12 +47,12 @@ def make_raw(image_path, image_link):
         })
         )
 
-def calc_thumb_resize((raw_width, raw_height)):
+def calc_thumb_resize(image_size):
     ## target_height/raw_height = conv_factor to multiply raw by to get desired thumb size
-    conv = 72/raw_height
-    new_height = raw_height*conv
-    new_width = raw_width*conv
-    return((new_width,new_height))
+    conv = 72/image_size[1]
+    new_height = image_size[1]*conv
+    new_width = image_size[0]*conv
+    return((int(new_width),int(new_height)))
 
 
 def make_thumb(image_path, image_link):
@@ -62,8 +62,8 @@ def make_thumb(image_path, image_link):
     raw_image.resize(new_dims).save(new_path)
 
     return(pd.DataFrame({
-        "image_id": [os.path.filename(image_path).split(".")[0]],
-        "file_name": [os.path.filename(new_path)],
+        "image_id": [os.path.basename(image_path).split(".")[0]],
+        "file_name": [os.path.basename(new_path)],
         "file_path" : [new_path],
         "image_width_px": [new_dims[0]],
         "image_height_px": [new_dims[1]],
@@ -87,35 +87,24 @@ def make_thumb(image_path, image_link):
                     ##Don't have to worry about returning and merging dataframe rows
                     ##Have another task, get_image_data that parses a single row output from make_thumb and then adds the new line with raw swapped in and return the two row df that way
 
-def write_data_to_pg(dataframe,dest_table):
-    try:
-        with SQLEngine('novartis_dummy_db') as engine:
-            dataframe.to_sql(
-                    name=dest_table,
-                    con = engine,
-                    if_exists='append',
-                    index=False
-                    )
-    except Exception as err:
-        print("Could not write data out to postgres!\n{}".format(err))
-
 def remove_original(image_path):
     os.remove(image_path)
 
 
-def expand_dir_and_transform(image_path, image_link, dest_table):
+def expand_dir_and_transform(image_path, image_link):
 #    base_name,image_ext = os.path.basename(image_path).split(".")
 #    target_dir = os.path.dirname(image_path)
     ## Call specific functions for each file type
         ## Rename the file that's already downloaded to raw, no real transformation other than to be renamed
         try:
-            raw = make_raw(image_path)
+            raw = make_raw(image_path, image_link)
             thumb = make_thumb(image_path, image_link)
-            write_data_to_pg(raw.append(thumb, ignore_index=True), dest_table)
         except Exception as err:
             print("Was not able to transform {}!\nERROR: {}".format(image_path, err))
+            raise
         else:
             remove_original(image_path)
+            return(raw.append(thumb, ignore_index=True))
 
 
 

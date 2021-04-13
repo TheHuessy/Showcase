@@ -96,11 +96,12 @@ def make_raw(image_path, image_link):
         "image_height_px": [raw_image.size[1]],
         "image_size_byte": [os.path.getsize(new_path)],
         "origin_link": [image_link],
-        "date_saved": [datetime.now().strftime("%Y-%m-%d")]
+        "date_saved": [datetime.now().strftime("%Y-%m-%d")],
+        "raw_conv_fctr": [1]
         })
         )
 
-def calc_thumb_resize(image_size):
+def calc_resize_data(image_size,new_height):
     """
     Takes in image dimensions in pixels, calcualtes and returns a tuple 
     with new image dimensions such that the new hiegh would be no more
@@ -113,15 +114,15 @@ def calc_thumb_resize(image_size):
 
     Returns
     ----------
-    A tuple with new image dimensions : tuple(int,int)
-        The new dimensions for the image to be resized into a thumbnail version.
+    An array with new image dimensions : array[int,int,float]
+        The new dimensions for the image to be resized into a thumbnail version as well as the conversion factor.
     """
 
     ## target_height/raw_height = conv_factor to multiply raw by to get desired thumb size
-    conv = 72/image_size[1]
+    conv = new_height/image_size[1]
     new_height = image_size[1]*conv
     new_width = image_size[0]*conv
-    return((int(new_width),int(new_height)))
+    return([int(new_width),int(new_height),conv])
 
 
 def make_thumb(image_path, image_link):
@@ -146,8 +147,8 @@ def make_thumb(image_path, image_link):
 
     new_path = append_file_name(image_path, "thumbnail")
     raw_image = Image.open(image_path)
-    new_dims = calc_thumb_resize(raw_image.size)
-    raw_image.resize(new_dims).save(fp=new_path, format="JPEG")
+    new_dims = calc_resize_data(raw_image.size, 72)
+    raw_image.resize((new_dims[0], new_dims[1])).save(fp=new_path, format="JPEG")
 
     return(pd.DataFrame({
         "image_id": [os.path.basename(image_path).split(".")[0]],
@@ -157,7 +158,46 @@ def make_thumb(image_path, image_link):
         "image_height_px": [new_dims[1]],
         "image_size_byte": [os.path.getsize(new_path)],
         "origin_link": [image_link],
-        "date_saved": [datetime.now().strftime("%Y-%m-%d")]
+        "date_saved": [datetime.now().strftime("%Y-%m-%d")],
+        "raw_conv_fctr": [new_dims[2]]
+        })
+        )
+
+def make_preview(image_path, image_link):
+    """
+    Takes in an image path, generates a preview version,
+    preview version file path, and saves it out to the 
+    new file path.
+
+    Parameters
+    ----------
+    image_path : os.path object or string
+        The path to where the image is currently stored.
+
+    image_link : url or string
+        The online source of the image, only used to add to output dataframe.
+
+    Returns
+    ----------
+    A single row data frame : pandas dataframe
+        A single row of data with image information to be added to a database.
+    """
+
+    new_path = append_file_name(image_path, "preview")
+    raw_image = Image.open(image_path)
+    new_dims = calc_resize_data(raw_image.size, 200)
+    raw_image.resize((new_dims[0], new_dims[1])).save(fp=new_path, format="JPEG")
+
+    return(pd.DataFrame({
+        "image_id": [os.path.basename(image_path).split(".")[0]],
+        "file_name": [os.path.basename(new_path)],
+        "file_path" : [new_path],
+        "image_width_px": [new_dims[0]],
+        "image_height_px": [new_dims[1]],
+        "image_size_byte": [os.path.getsize(new_path)],
+        "origin_link": [image_link],
+        "date_saved": [datetime.now().strftime("%Y-%m-%d")],
+        "raw_conv_fctr": [new_dims[2]]
         })
         )
 
@@ -202,10 +242,14 @@ def expand_dir_and_transform(image_path, image_link):
     try:
         raw = make_raw(image_path, image_link)
         thumb = make_thumb(image_path, image_link)
+        preview = make_preview(image_path, image_link)
     except Exception as err:
         print("Was not able to transform {}!\nERROR: {}".format(image_path, err))
         raise
     else:
         remove_original(image_path)
-        return(raw.append(thumb, ignore_index=True))
+        output_data = raw.append(thumb, ignore_index=True)
+        output_data = output_data.append(preview, ignore_index=True)
+
+        return(output_data)
 

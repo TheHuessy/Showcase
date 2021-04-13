@@ -139,10 +139,7 @@ shinyServer(function(input, output, session) {
      tags$h3("Image Preview"),
      imageOutput("thumb_preview",
                  click = "thumb_click",
-                 brush = brushOpts(
-                                   id = "thumb_brush",
-                                   resetOnNew = TRUE
-                                   )
+                 brush = brushOpts(id = "thumb_brush")
      )
    )})
 
@@ -154,10 +151,7 @@ shinyServer(function(input, output, session) {
                     tags$h3("Image Preview"),
                     imageOutput("thumb_preview",
                                 click = "thumb_click",
-                                brush = brushOpts(
-                                                  id = "thumb_brush",
-                                                  resetOnNew = TRUE
-                                )
+                                brush = brushOpts(id = "thumb_brush")
                     )
                     )})
 
@@ -201,7 +195,7 @@ shinyServer(function(input, output, session) {
    })
 
    output$thumb_preview <- renderImage({
-     list(src = get_image_path(preview_image_path))
+     list(src = get_image_path(image_id, "preview"))
    }, deleteFile=FALSE)
 })
 

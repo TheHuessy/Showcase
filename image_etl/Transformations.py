@@ -185,7 +185,7 @@ def make_preview(image_path, image_link):
 
     new_path = append_file_name(image_path, "preview")
     raw_image = Image.open(image_path)
-    new_dims = calc_resize_data(raw_image.size, 200)
+    new_dims = calc_resize_data(raw_image.size, 350)
     raw_image.resize((new_dims[0], new_dims[1])).save(fp=new_path, format="JPEG")
 
     return(pd.DataFrame({

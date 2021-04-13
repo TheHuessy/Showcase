@@ -1,5 +1,7 @@
 ## Custom additions
 *.swp
+*.RData
+*.Rhistory
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

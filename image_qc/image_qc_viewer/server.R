@@ -1,4 +1,6 @@
-##### LIBRARY #####
+###############
+### LIBRARY ###
+###############
 
 library(shiny)
 library(magick)
@@ -10,8 +12,9 @@ library(yaml)
 library(tools)
 
 
-
-##### SERVER DEFINITION #####
+#########################
+### SERVER DEFINITION ###
+#########################
 
 shinyServer(function(input, output, session) {
 
@@ -113,6 +116,9 @@ shinyServer(function(input, output, session) {
  })
  }
 
+ #################
+ ### APP START ###
+ #################
 
  full_dat <<- pull_all_data()
  image_id <<- full_dat$image_id[1]
